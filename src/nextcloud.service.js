@@ -615,8 +615,303 @@ async function shareWithUser(
 }
 
 
+/**
+ * Ensure a folder exists in the target user's own DAV space.
+ * MKCOL returns 201 when created, 405 when it already exists —
+ * both are treated as success.
+ */
+async function ensureUserFolder(
+  targetUserId,
+  folderName,
+  requestAuth
+) {
+
+  const davFolderPath =
+    `/remote.php/dav/files/${encodeURIComponent(
+      targetUserId
+    )}/${encodeURIComponent(folderName)}`;
+
+  console.log(
+    '[FOLDER] Ensuring folder exists:',
+    davFolderPath
+  );
+
+  try {
+
+    const response =
+      await nextcloud.request({
+        method: 'MKCOL',
+        url: davFolderPath,
+        auth: requestAuth,
+      });
+
+    console.log(
+      '[FOLDER] HTTP:',
+      response.status
+    );
+
+  } catch (error) {
+
+    if (error.response?.status === 405) {
+
+      console.log(
+        '[FOLDER] Already exists'
+      );
+
+      return;
+    }
+
+    console.error(
+      '[FOLDER] FAILED'
+    );
+
+    console.error(
+      '[FOLDER] Error:',
+      error.message
+    );
+
+    throw error;
+  }
+}
+
+
+/**
+ * Upload directly into the TARGET USER's own Nextcloud Drive,
+ * under an "API-Uploads" folder — no sharing step required.
+ */
+async function uploadToUserDrive(
+  localFilePath,
+  originalFileName,
+  targetUserId,
+  mimeType,
+  requestAuth
+) {
+
+  console.log('\n');
+  console.log('========================================');
+  console.log('[UPLOAD] UPLOAD TO USER DRIVE');
+  console.log('========================================');
+
+  console.log(
+    '[UPLOAD] Target user ID:',
+    targetUserId
+  );
+
+  if (!targetUserId) {
+
+    throw new Error(
+      'targetUserId is required'
+    );
+  }
+
+  if (!fs.existsSync(localFilePath)) {
+
+    throw new Error(
+      `File does not exist: ${localFilePath}`
+    );
+  }
+
+  const stats =
+    fs.statSync(localFilePath);
+
+  console.log(
+    '[UPLOAD] Local file size:',
+    stats.size
+  );
+
+  const folderName =
+    'Scanned-Documents';
+
+  await ensureUserFolder(
+    targetUserId,
+    folderName,
+    requestAuth
+  );
+
+  const davPath =
+    `/remote.php/dav/files/${encodeURIComponent(
+      targetUserId
+    )}/${encodeURIComponent(
+      folderName
+    )}/${encodeURIComponent(
+      originalFileName
+    )}`;
+
+  console.log(
+    '[UPLOAD] DAV path:',
+    davPath
+  );
+
+  console.log(
+    '[UPLOAD] Upload URL:',
+    `${NEXTCLOUD_URL}${davPath}`
+  );
+
+  try {
+
+    const stream =
+      fs.createReadStream(localFilePath);
+
+    const response =
+      await nextcloud.put(
+        davPath,
+        stream,
+        {
+          headers: {
+            'Content-Type':
+              mimeType ||
+              'application/octet-stream',
+
+            'Content-Length':
+              stats.size,
+          },
+
+          auth: requestAuth,
+
+          maxBodyLength:
+            Infinity,
+
+          maxContentLength:
+            Infinity,
+        }
+      );
+
+    console.log(
+      '[UPLOAD] HTTP:',
+      response.status
+    );
+
+    console.log(
+      '[UPLOAD] SUCCESS'
+    );
+
+    return {
+      remoteFileName:
+        originalFileName,
+
+      remotePath:
+        `/${folderName}/${originalFileName}`,
+
+      status:
+        response.status,
+    };
+
+  } catch (error) {
+
+    console.error(
+      '[UPLOAD] FAILED'
+    );
+
+    console.error(
+      '[UPLOAD] Error:',
+      error.message
+    );
+
+    if (error.response) {
+
+      console.error(
+        '[UPLOAD] HTTP:',
+        error.response.status
+      );
+
+      console.error(
+        '[UPLOAD] Response:',
+        error.response.data
+      );
+    }
+
+    throw error;
+  }
+}
+
+
+/**
+ * Resolve the identity behind a set of Basic Auth credentials by
+ * calling Nextcloud's "self" OCS endpoint with them. This both
+ * authenticates the credentials (Nextcloud returns 401 if invalid)
+ * and returns the caller's own user record — no directory search
+ * needed since the caller is proving who they are.
+ */
+async function whoAmI(requestAuth) {
+
+  console.log('\n');
+  console.log('========================================');
+  console.log('[AUTH] RESOLVE CALLER IDENTITY');
+  console.log('========================================');
+
+  console.log(
+    '[AUTH] Username:',
+    requestAuth?.username
+  );
+
+  try {
+
+    const response =
+      await nextcloud.get(
+        '/ocs/v1.php/cloud/user',
+        {
+          headers: OCS_HEADERS,
+          auth: requestAuth,
+        }
+      );
+
+    const ocs =
+      response.data?.ocs;
+
+    if (
+      !ocs ||
+      ocs.meta?.status !== 'ok'
+    ) {
+
+      throw new Error(
+        ocs?.meta?.message ||
+        'Unable to authenticate to Nextcloud'
+      );
+    }
+
+    const user =
+      ocs.data;
+
+    console.log(
+      '[AUTH] Authenticated as:',
+      user.id
+    );
+
+    console.log(
+      '[AUTH] Email:',
+      user.email
+    );
+
+    return user;
+
+  } catch (error) {
+
+    console.error(
+      '[AUTH] FAILED'
+    );
+
+    console.error(
+      '[AUTH] Error:',
+      error.message
+    );
+
+    if (error.response) {
+
+      console.error(
+        '[AUTH] HTTP:',
+        error.response.status
+      );
+    }
+
+    throw error;
+  }
+}
+
+
 module.exports = {
-  findUserByEmail, 
+  findUserByEmail,
   uploadToAdmin,
   shareWithUser,
-}; 
+  uploadToUserDrive,
+  whoAmI,
+};

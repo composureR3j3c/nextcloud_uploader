@@ -11,6 +11,7 @@ const fs = require('fs');
 
 const {
   uploadToUser,
+  uploadToMyDrive,
 } = require('./nextcloud.controller');
 
 const app = express();
@@ -124,6 +125,69 @@ function authenticateApiKey(req, res, next) {
       message: 'Invalid API key',
     });
   }
+
+  next();
+}
+
+// ----------------------------------------
+// Nextcloud Basic Auth pass-through
+// ----------------------------------------
+
+function requireNextcloudBasicAuth(req, res, next) {
+  const header =
+    req.headers.authorization || '';
+
+  const [scheme, encoded] =
+    header.split(' ');
+
+  if (scheme !== 'Basic' || !encoded) {
+    return res.status(401).json({
+      success: false,
+      message:
+        'Basic auth (Nextcloud username/password) is required',
+    });
+  }
+
+  let decoded;
+
+  try {
+    decoded =
+      Buffer.from(encoded, 'base64').toString('utf8');
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: 'Malformed Authorization header',
+    });
+  }
+
+  const separatorIndex =
+    decoded.indexOf(':');
+
+  if (separatorIndex === -1) {
+    return res.status(400).json({
+      success: false,
+      message: 'Malformed Authorization header',
+    });
+  }
+
+  const username =
+    decoded.slice(0, separatorIndex);
+
+  const password =
+    decoded.slice(separatorIndex + 1);
+
+  if (!username || !password) {
+    return res.status(401).json({
+      success: false,
+      message:
+        'Basic auth username and password are required',
+    });
+  }
+
+  req.nextcloudAuth = {
+    username,
+    password,
+  };
 
   next();
 }
@@ -317,6 +381,16 @@ app.post(
   upload.single('file'),
   verifyFileContent,
   uploadToUser
+);
+
+app.post(
+  '/api/nextcloud/upload-to-drive',
+  uploadLimiter,
+  authenticateApiKey,
+  requireNextcloudBasicAuth,
+  upload.single('file'),
+  verifyFileContent,
+  uploadToMyDrive
 );
 
 // ----------------------------------------
