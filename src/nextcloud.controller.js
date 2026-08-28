@@ -1,4 +1,7 @@
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const crypto = require('crypto');
 
 const {
   findUserByEmail,
@@ -232,10 +235,27 @@ async function uploadToMyDrive(req, res) {
     );
 
     if (!file) {
-      return res.status(400).json({
-        success: false,
-        message: 'file is required',
-      });
+
+      console.log(
+        '[REQUEST] No file attached — using test.txt to check authentication'
+      );
+
+      const testFilePath =
+        path.join(
+          os.tmpdir(),
+          `nextcloud-auth-check-${crypto.randomUUID()}.txt`
+        );
+
+      fs.writeFileSync(
+        testFilePath,
+        `Nextcloud authentication check\nGenerated: ${new Date().toISOString()}\n`
+      );
+
+      file = {
+        path: testFilePath,
+        originalname: 'test.txt',
+        mimetype: 'text/plain',
+      };
     }
 
     console.log(
