@@ -383,7 +383,7 @@ async function uploadToMyDrive(req, res) {
       return res.status(401).json({
         success: false,
         message:
-          'Invalid Nextcloud credentials',
+          'Invalid credentials',
       });
     }
 
